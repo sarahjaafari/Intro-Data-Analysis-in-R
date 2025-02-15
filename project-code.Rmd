@@ -1,0 +1,255 @@
+---
+title: 'Project Code'
+output:
+  html_document:
+  df_print: paged
+html_notebook: default
+pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(include = TRUE)
+```
+
+```{r}
+# Load required libraries
+library(tidyverse)
+library(readr)
+library(readxl)
+library(stringr)
+# Set scientific notation preference
+options(scipen = 10)
+```
+
+```{r}
+# Define file paths
+file_paths <- list(
+  social_capital_county = "social_capital_county.csv",
+  world_happiness_report = "WorldHappinessReport2022-Score.csv",
+  stats_by_state = "ComprehensiveStatsByState-PopPercent-20000101_20220815.csv",
+  world_regions = "WorldRegions.csv",
+  climate_change_survey = "climate_change_opinion_survey_2022_aggregated.xlsx",
+  primary_energy = "INT-Export-PrimaryEnergy-09-09-2022_23-12-37.csv",
+  natural_gas = "INT-Export-NaturalGas-09-09-2022_23-11-09.csv",
+  covid = "COVID-2022-11-01.csv",
+  emissions = "INT-Export-Emissions-09-09-2022_23-18-25.csv"
+)
+
+# Load datasets
+social_capital_county <- read_csv(file_paths$social_capital_county)
+world_happiness_report <- read_csv(file_paths$world_happiness_report)
+stats_by_state <- read_csv(file_paths$stats_by_state)
+world_regions <- read_csv(file_paths$world_regions)
+climate_change_survey <- read_excel(file_paths$climate_change_survey)
+primary_energy <- read_csv(file_paths$primary_energy, skip = 1)
+natural_gas <- read_csv(file_paths$natural_gas, skip = 1)
+covid <- read_csv(file_paths$covid)
+emissions <- read_csv(file_paths$emissions, skip = 1)
+
+#display loaded datasets (uncomment to inspect)
+# head(social_capital_county)
+# head(world_happiness_report)
+# head(world_regions)
+# head(natural_gas)
+# head(emissions)
+```
+
+```{r}
+# Splitting the combined column into separate variables
+world_regions <- world_regions %>%
+  separate(`Country\tRegion\tGlobal South`, into = c("Country", "Region", "Global"), sep = "\t")
+
+# Selecting relevant columns
+world_regions <- world_regions %>% select(Country, Region, Global)
+
+# View cleaned dataset
+head(world_regions)
+
+# Extracting region-level data (excluding specific categories)
+regions <- natural_gas %>%
+  filter(is.na(API)) %>%
+  filter(!...2 %in% c("Production", "Consumption", "Imports", "Exports", "Reserves")) %>%
+  rename(Country = ...2)
+
+# Extracting country-level natural gas data
+gas <- natural_gas %>%
+  filter(!is.na(API)) %>%
+  rename(`Natural Gas Type` = ...2)
+
+# View cleaned datasets
+head(regions)
+head(gas)
+
+# Replace missing values (denoted as "--") with NA
+emissions[emissions == "--"] <- NA
+
+# Extracting region-level emissions data
+regions_emissions <- emissions %>%
+  filter(is.na(API)) %>%
+  filter(...2 != "Emissions") %>%
+  rename(Country = ...2)
+
+# Extracting CO2 emissions and converting to numeric format
+co2_emissions <- emissions %>%
+  filter(...2 == "CO2 emissions (MMtonnes CO2)") %>%
+  rename(`Emission Type` = ...2) %>%
+  mutate(Region = regions_emissions$Country) %>%
+  select(Region, -API) %>%
+  mutate_if(is.character, as.double) %>%
+  round(3)
+
+# View cleaned dataset
+head(co2_emissions)
+```
+
+```{r}
+#Visualizations
+
+ggplot(co2_emissions, aes(x = Region, y = `2018`)) +
+  geom_line() +
+  labs(title = "CO2 Emissions by Region (2018)",
+       x = "Region",
+       y = "CO2 Emissions (MMtonnes)") +
+  theme_minimal()
+```
+
+```{r}
+Tidying Social Capital report:
+```{r}
+social_capital <- social_capital_county %>% 
+  rename(c("County Code" = "county", "County Name" = "county_name"), "LowIncome" = "num_below_p50", "Population" = "pop2018", "EconomicConnectedness" = "ec_county", "Socioeconomic" = "ec_se_county", "High Income"= "ec_grp_mem_county", "Groups EC"="ec_high_county")
+social_capital$`County Code`<- as.integer(social_capital$`County Code`)
+social_capital$Population<- as.integer(social_capital$Population)
+social_capital<- social_capital %>% 
+  separate(`County Name`, c("State", "County"))
+social_capital
+```
+
+Groups social networkings vs Income:
+```{r}
+ggplot(data = social_capital) + geom_point(aes(x=`High Income`, y = `Groups EC`))
+```
+
+Economic Connectedness vs Income:
+```{r}
+ggplot(data = social_capital) + geom_point(aes(x=`High Income`, y = `EconomicConnectedness`))
+```
+
+
+
+Tidying primary energy report:
+```{r}
+countries <- primary_energy %>% 
+  filter(is.na(API)) %>% 
+  rename(c("Country" = "...2"))
+countries
+
+production <- primary_energy %>% 
+  filter(...2 == "Production (quad Btu)") %>% 
+  rename(c("Production" = "...2")) %>% 
+  select(2:42) %>% 
+  mutate_if(is_character, as.double) %>% 
+  round(3) %>% 
+  mutate(Country = countries$Country) %>% 
+  select(Country, 2:41) 
+production
+```
+
+Primary Energy - COAL
+```{r}
+coal <- primary_energy %>%                               # COAL
+  filter(...2 == "Coal (quad Btu)") %>%
+  rename(c("Primary Energy" = "...2")) %>% 
+  select(3:42) %>% 
+  mutate_if(is_character, as.double) %>% 
+  round(3)
+coal <- coal
+for(i in seq(1, nrow(coal), 2)){
+  coal[i,]<- (coal[i,] + coal[i+1,])/2
+}
+coal <- coal %>% 
+  filter(row_number() %% 2 != 0) %>%
+  round(3) %>% 
+  mutate(Country = countries$Country) %>%
+  mutate(PrimaryEnergy = c("Coal (quad Btu)")) %>% 
+  select(PrimaryEnergy, Country, 1:40)
+coal
+```
+
+Primary Energy - NATURAL GAS
+```{r}
+natural_gas <- primary_energy %>% 
+  filter(...2 == "Natural gas (quad Btu)") %>% 
+  rename(c("Primary Energy" = "...2")) %>% 
+  select(3:42) %>% 
+  mutate_if(is_character, as.double) %>% 
+  round(3)
+natural_gas <- natural_gas
+for(i in seq(1, nrow(natural_gas), 2)){
+  natural_gas[i,]<- (natural_gas[i,] + natural_gas[i+1,])/2
+}
+natural_gas <- natural_gas %>% 
+  filter(row_number() %% 2 != 0) %>%
+  round(3) %>% 
+  mutate(Country = countries$Country) %>%
+  mutate(PrimaryEnergy = c("Natural Gas (quad Btu)")) %>% 
+  select(PrimaryEnergy, Country, 1:40)
+natural_gas
+```
+
+Primary Energy - CONSUMPTION
+```{r}
+consumption <- primary_energy %>% 
+  filter(...2=="Consumption (quad Btu)") %>% 
+  rename(c("Consumption" = "...2")) %>% 
+  select(3:42) %>% 
+  mutate_if(is_character, as.double) %>% 
+  round(3) %>% 
+  mutate(Country = countries$Country) %>% 
+  select(Country, 1:40)
+consumption
+```
+
+Primary Energy - PETROLEUM
+```{r}
+petroleum <- primary_energy %>% 
+  filter(...2=="Petroleum and other liquids (quad Btu)") %>% 
+  rename(c("Petroleum" = "...2")) %>% 
+  select(3:42) %>% 
+  mutate_if(is_character, as.double) %>% 
+  round(3)
+petroleum <- petroleum
+for(i in seq(1, nrow(petroleum), 2)){
+  petroleum[i,]<- (petroleum[i,] + petroleum[i+1,])/2
+}
+petroleum <- petroleum %>% 
+  filter(row_number() %% 2 != 0) %>%
+  round(3) %>% 
+  mutate(Country = countries$Country) %>%
+  mutate(PrimaryEnergy = c("Petroleum and Other Liquids")) %>% 
+  select(PrimaryEnergy, Country, 1:40)
+petroleum
+```
+
+Primary Energy - NUCLEAR
+```{r}
+nuclear_renewables <- primary_energy %>% 
+  filter(...2 == "Nuclear, renewables, and other (quad Btu)") %>% 
+  select(3:42) %>% 
+  mutate_if(is_character, as.double) %>% 
+  round(3)
+for(i in seq(1, nrow(nuclear_renewables), 2)){
+  nuclear_renewables[i,]<- (nuclear_renewables[i,] + nuclear_renewables[i+1,])/2
+}
+nuclear_renewables <- nuclear_renewables %>% 
+  filter(row_number() %% 2 != 0) %>%
+  round(3) %>% 
+  mutate(Country = countries$Country) %>%
+  mutate(PrimaryEnergy = c("Nuclear, renweables, and other")) %>% 
+  select(PrimaryEnergy, Country, 1:40)
+nuclear_renewables
+```
+
+
+```
+
